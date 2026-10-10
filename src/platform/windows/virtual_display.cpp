@@ -671,16 +671,30 @@ std::wstring createVirtualDisplay(
 		return std::wstring();
 	}
 
+	// LANDock: the stock wait gives up after ~0.6 s; some displays take longer to appear.
 	uint32_t retryInterval = 20;
+	uint32_t waited = 0;
+	bool extended = false;
 	wchar_t deviceName[CCHDEVICENAME]{};
 	while (!GetAddedDisplayName(output, deviceName)) {
 		Sleep(retryInterval);
-		if (retryInterval > 320) {
+		waited += retryInterval;
+		// LANDock: Windows may attach the new monitor as a clone on the physical adapter, so the expected target
+		// never becomes active. Ask for an extended topology once, early, then keep polling.
+		if (!extended && waited >= 400) {
+			extended = true;
+			LONG r = SetDisplayConfig(0, nullptr, 0, nullptr, SDC_APPLY | SDC_TOPOLOGY_EXTEND);
+			printf("[SUDOVDA] Forced extend topology after %u ms, result %ld\n", waited, r);
+		}
+		if (waited > 8000) {
 			printf("[SUDOVDA] Cannot get name for newly added virtual display!\n");
 			return std::wstring();
 		}
-		retryInterval *= 2;
+		if (retryInterval < 320) {
+			retryInterval *= 2;
+		}
 	}
+	printf("[SUDOVDA] Display name resolved after %u ms\n", waited);
 
 	wprintf(L"[SUDOVDA] Virtual display added successfully: %ls\n", deviceName);
 	printf("[SUDOVDA] Configuration: W: %d, H: %d, FPS: %d\n", width, height, fps);
