@@ -61,7 +61,27 @@ LONG getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode) {
 	return EnumDisplaySettingsW(deviceName, ENUM_CURRENT_SETTINGS, &devMode);
 }
 
+// LANDock: every instance (a process of its own) changes the one display configuration of the PC. changeDisplaySettings2 reads the
+// whole configuration, changes one display and writes all of it back, so a write from another instance that starts in between
+// (from an older read) puts the old mode of a display back. The lock makes those read-modify-write steps take turns.
+struct DisplayConfigLock {
+	HANDLE handle = nullptr;
+	DisplayConfigLock() {
+		handle = CreateMutexW(nullptr, FALSE, L"Local\\LANDockDisplayConfig");
+		if (handle) WaitForSingleObject(handle, 30000);
+	}
+	~DisplayConfigLock() {
+		if (handle) {
+			ReleaseMutex(handle);
+			CloseHandle(handle);
+		}
+	}
+	DisplayConfigLock(const DisplayConfigLock&) = delete;
+	DisplayConfigLock& operator=(const DisplayConfigLock&) = delete;
+};
+
 LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, int refresh_rate, bool bApplyIsolated) {
+	DisplayConfigLock configLock;
 	UINT32 pathCount = 0;
 	UINT32 modeCount = 0;
 	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount)) {
